@@ -2,7 +2,7 @@
 
 [package]
 version = "0.1.0"
-name = "ecdsa-record-program"
+name = "multisig-record-program"
 edition = "2021"
 
 [dependencies]
