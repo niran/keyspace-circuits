@@ -1,4 +1,3 @@
-use num_bigint::BigUint;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::{collections::HashSet, error::Error};
 
@@ -6,21 +5,6 @@ use super::{k_public_key::KPublicKey, k_signature::KSignature};
 
 #[derive(Debug, Clone)]
 pub struct CurrentData([u8; 256]);
-
-impl CurrentData {
-    pub fn assert_owner(&self, owner_index: u8, recovered_key: [u8; 64]) {
-        // The threshold value takes up the first 64 bytes of CurrentData. Owners begin at 64 bytes.
-        let owner_bytes = &self.0[(owner_index + 1) as usize * 64..(owner_index + 2) as usize * 64];
-        assert_eq!(owner_bytes, &recovered_key[..]);
-    }
-
-    pub fn assert_threshold(&self, owner_indexes: Vec<u8>) {
-        let unique_owners = owner_indexes.iter().collect::<HashSet<_>>();
-        let threshold_bytes = &self.0[..64];
-        let threshold = BigUint::from_bytes_be(threshold_bytes);
-        assert!(threshold <= unique_owners.len().into());
-    }
-}
 
 impl Serialize for CurrentData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -50,6 +34,86 @@ impl<'de> Deserialize<'de> for CurrentData {
     }
 }
 
+impl TryFrom<&[KPublicKey]> for CurrentData {
+    type Error = InputError;
+
+    // Create CurrentData from up to 3 public keys with a default threshold of 1.
+    fn try_from(value: &[KPublicKey]) -> Result<Self, Self::Error> {
+        if value.len() > 3 {
+            return Err(InputError);
+        }
+        let mut bytes = [0u8; 256];
+        for (i, pk) in value.iter().enumerate() {
+            bytes[i * 64..(i + 1) * 64].copy_from_slice(&pk.0);
+        }
+        bytes[255] = 1;
+        Ok(CurrentData(bytes))
+    }
+}
+
+pub trait MultisigDataGetter {
+    fn get_bytes(&self) -> &[u8; 256];
+
+    fn get_threshold(&self) -> u8 {
+        let bytes = self.get_bytes();
+        bytes[bytes.len() - 1]
+    }
+}
+
+impl MultisigDataGetter for CurrentData {
+    fn get_bytes(&self) -> &[u8; 256] {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
+pub struct VerifyingKeyBytes([u8; 64]);
+
+pub struct MultisigData {
+    pub owners: [VerifyingKeyBytes; 3],
+    pub threshold: u8,
+}
+
+impl MultisigData {
+    pub fn is_owner(&self, owner_index: u8, recovered_key: [u8; 64]) -> bool {
+        assert!(
+            owner_index < 3,
+            "CurrentData can only fit 3 owners and a threshold"
+        );
+        recovered_key[..] == self.owners[usize::from(owner_index)].0
+    }
+
+    pub fn verify_signatures(
+        &self,
+        new_key: &[u8; 32],
+        signatures: &[KSignature],
+    ) -> HashSet<VerifyingKeyBytes> {
+        let mut unique_signers: HashSet<VerifyingKeyBytes> = HashSet::new();
+        for sig in signatures.iter() {
+            let recovered_key = sig.ecrecover(new_key);
+            if self.is_owner(sig.owner_index, recovered_key) {
+                unique_signers.insert(VerifyingKeyBytes(recovered_key));
+            }
+        }
+        unique_signers
+    }
+}
+
+impl From<&CurrentData> for MultisigData {
+    fn from(value: &CurrentData) -> Self {
+        let mut owners = [VerifyingKeyBytes([0; 64]); 3];
+        #[allow(clippy::needless_range_loop)]
+        for i in 0..owners.len() {
+            let bytes: [u8; 64] = value.0[i * 64..(i + 1) * 64]
+                .try_into()
+                .expect("This slice should always be 64 bytes");
+            owners[i] = VerifyingKeyBytes(bytes);
+        }
+        let threshold = value.0[255];
+        Self { owners, threshold }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Inputs {
     pub current_data: CurrentData,
@@ -57,24 +121,13 @@ pub struct Inputs {
     pub signatures: Vec<KSignature>,
 }
 
-// I wanted to use serde:ser:Error, but got tons of compiler errors and I'm not sure why.
-// https://stackoverflow.com/questions/62450500/why-does-a-trait-type-boxdyn-error-error-with-sized-is-not-implemented-but
-#[derive(Debug, Default)]
-pub struct InputError;
-impl std::fmt::Display for InputError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("Input Error")
-    }
-}
-impl Error for InputError {}
-
 impl Inputs {
     pub fn new(
         signers: &[KPublicKey],
         new_key: [u8; 32],
         signatures: Vec<KSignature>,
     ) -> Result<Self, InputError> {
-        let current_data = serialize_signers(signers)?;
+        let current_data: CurrentData = signers.try_into()?;
         Ok(Self {
             current_data,
             new_key,
@@ -83,13 +136,11 @@ impl Inputs {
     }
 }
 
-fn serialize_signers(signers: &[KPublicKey]) -> Result<CurrentData, InputError> {
-    if signers.len() > 4 {
-        return Err(InputError);
+#[derive(Debug, Default)]
+pub struct InputError;
+impl std::fmt::Display for InputError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.write_str("Input Error")
     }
-    let mut bytes = [0u8; 256];
-    for (i, pk) in signers.iter().enumerate() {
-        bytes[i * 64..(i + 1) * 64].copy_from_slice(&pk.0);
-    }
-    Ok(CurrentData(bytes))
 }
+impl Error for InputError {}
