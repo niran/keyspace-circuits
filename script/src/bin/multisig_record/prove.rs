@@ -1,4 +1,3 @@
-use hex::encode;
 use k256::{ecdsa::SigningKey, elliptic_curve::rand_core::OsRng};
 use rand::Rng;
 use sp1_sdk::{ProverClient, SP1Stdin};
@@ -51,7 +50,6 @@ fn random_inputs() -> Inputs {
         .map(|_| SigningKey::random(&mut OsRng))
         .collect();
     let new_key = rng.gen();
-    println!("New key: 0x{}", encode(new_key));
 
     let threshold = rng.gen_range(0..signers.len()) + 1;
     let signatures = signers
@@ -59,7 +57,7 @@ fn random_inputs() -> Inputs {
         .take(threshold)
         .enumerate()
         .map(|(owner_index, signing_key)| {
-            sign_hash(&signing_key, &new_key, owner_index.try_into().unwrap())
+            sign_hash(signing_key, &new_key, owner_index.try_into().unwrap())
         })
         .collect();
 

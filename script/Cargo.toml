@@ -20,7 +20,6 @@ path = "src/bin/batcher/prove.rs"
 
 [dependencies]
 sp1-sdk = "1.0.1"
-hex = "0.4.3"
 k256 = "0.13.3"
 k_lib = { path = "../k_lib" }
 tiny-keccak = { version = "2.0.0", features = ["keccak"] }
