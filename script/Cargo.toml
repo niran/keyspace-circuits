@@ -11,6 +11,10 @@ name = "prove_record"
 path = "src/bin/ecdsa_record/prove.rs"
 
 [[bin]]
+name = "prove_multisig_record"
+path = "src/bin/multisig_record/prove.rs"
+
+[[bin]]
 name = "prove_batcher"
 path = "src/bin/batcher/prove.rs"
 

@@ -6,6 +6,24 @@ use super::{k_public_key::KPublicKey, k_signature::KSignature};
 #[derive(Debug, Clone)]
 pub struct CurrentData([u8; 256]);
 
+impl CurrentData {
+    pub fn new<T>(signers: &[T], threshold: u8) -> Result<Self, InputError>
+    where
+        for<'a> &'a T: Into<KPublicKey>,
+    {
+        if signers.len() > 3 {
+            return Err(InputError);
+        }
+        let mut bytes = [0u8; 256];
+        for (i, pk) in signers.iter().enumerate() {
+            let item: KPublicKey = pk.into();
+            bytes[i * 64..(i + 1) * 64].copy_from_slice(item.0.as_slice());
+        }
+        bytes[255] = threshold;
+        Ok(Self(bytes))
+    }
+}
+
 impl Serialize for CurrentData {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -67,8 +85,9 @@ impl MultisigDataGetter for CurrentData {
 }
 
 #[derive(Debug, Clone, Copy, Hash, Eq, PartialEq)]
-pub struct VerifyingKeyBytes([u8; 64]);
+pub struct VerifyingKeyBytes(pub [u8; 64]);
 
+#[derive(Debug)]
 pub struct MultisigData {
     pub owners: [VerifyingKeyBytes; 3],
     pub threshold: u8,
@@ -80,7 +99,7 @@ impl MultisigData {
             owner_index < 3,
             "CurrentData can only fit 3 owners and a threshold"
         );
-        recovered_key[..] == self.owners[usize::from(owner_index)].0
+        recovered_key == self.owners[usize::from(owner_index)].0
     }
 
     pub fn verify_signatures(
